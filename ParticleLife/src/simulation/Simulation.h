@@ -16,18 +16,30 @@ namespace PLife
     {
         Vector2 Position;
         Vector2 Velocity;
-        uint8_t Type;       // index into the rule matrix / color table
+        float   EddyDiffusion;  // how strongly this particle reacts to temperature (world units^2/s at temperature 1)
+        uint8_t Type;           // index into the rule matrix / color table
     };
 
     struct SimulationSettings
     {
-        int   ParticleCount   = 2000;
-        int   TypeCount       = 6;
+        // Particles
+        int   ParticleCount     = 2000;
+        int   TypeCount         = 6;
+
+        // Forces
         float InteractionRadius = 80.0f;  // rMax: particles further apart than this ignore each other (world units)
-        float RepulsionRange  = 0.3f;     // beta: fraction of rMax below which particles always repel
-        float ForceFactor     = 10.0f;    // overall force strength
-        float FrictionHalfLife = 0.04f;   // seconds until velocity halves without forces
-        float ParticleRadius  = 2.5f;     // drawing only (world units)
+        float RepulsionRange    = 0.3f;   // beta: fraction of rMax below which particles always repel
+        float ForceFactor       = 10.0f;  // overall force strength
+        float FrictionHalfLife  = 0.04f;  // seconds until velocity halves without forces
+
+        // Temperature: random thermal motion. Each step a particle is displaced by
+        // N(0,1) * sqrt(2 * D * dt) per axis, with D = Temperature * particle.EddyDiffusion.
+        float Temperature       = 1.0f;
+        float EddyDiffusionMin  = 0.0f;   // per-particle factor is drawn uniformly from [min, max]
+        float EddyDiffusionMax  = 20.0f;
+
+        // Display
+        float ParticleRadius    = 2.5f;   // world units
     };
 
     // Particle Life: particles of different types attract/repel each other according
@@ -51,7 +63,14 @@ namespace PLife
         void RandomizeRules();
         // Replace all particles with SimulationSettings::ParticleCount random ones.
         void RespawnParticles();
+        // Spawns with a random eddy diffusion factor from the settings' range.
         void Spawn(Vector2 position, uint8_t type);
+        // Draw a new eddy diffusion factor for every particle from the settings' range.
+        void RerollEddyDiffusion();
+
+        // Applies changed settings live: resizes the rule matrix (keeping existing rules),
+        // adds/removes particles, rebuilds the neighbor grid and rerolls eddy factors as needed.
+        void SetSettings(const SimulationSettings& settings);
 
         // rules[a][b]: how strongly type a is attracted to (+) / repelled by (-) type b.
         float GetRule(int a, int b) const { return m_Rules[a * m_Settings.TypeCount + b]; }
@@ -64,7 +83,10 @@ namespace PLife
 
     private:
         float Force(float normalizedDistance, float attraction) const;
-        void  BuildGrid();
+        float RandomEddyDiffusion();
+        void  SetupTypes();     // colors and rule matrix size from TypeCount
+        void  SetupGrid();      // cell layout from InteractionRadius
+        void  BuildGrid();      // sort particles into cells
 
     private:
         const World& m_World;

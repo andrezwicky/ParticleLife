@@ -29,7 +29,8 @@ namespace PLife
     private:
         void HandleViewInput();
         void HandleSimulationInput();
-        void DrawRulesPanel();
+        void DrawSimulationPanel();
+        void DrawRulesSection();
 
     private:
         // Declaration order matters: Simulation and Renderer reference the World.
@@ -41,6 +42,6 @@ namespace PLife
         // independent of the frame rate.
         float m_StepAccumulator = 0.0f;
         bool m_Paused = false;
-        bool m_ShowRulesPanel = true;
+        bool m_ShowPanel = true;
     };
 }

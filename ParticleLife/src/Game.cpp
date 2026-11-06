@@ -51,14 +51,14 @@ namespace PLife
         const float bottom = m_Renderer->GetScreenSize().y;
         m_Renderer->DrawScreenText(TextFormat("%d particles%s", (int)m_Simulation.GetParticles().size(), m_Paused ? "   PAUSED" : ""),
             10.0f, 10.0f, 18.0f, RAYWHITE);
-        m_Renderer->DrawScreenText("Wheel: zoom   Right drag: pan   R: reset view   Space: pause   S: single step   N: new rules   P: respawn   Tab: rules panel",
+        m_Renderer->DrawScreenText("Wheel: zoom   Right drag: pan   R: reset view   Space: pause   S: single step   N: new rules   P: respawn   Tab: panel",
             10.0f, bottom - 26.0f, 16.0f, GRAY);
     }
 
     void Game::OnImGuiRender()
     {
-        if (m_ShowRulesPanel)
-            DrawRulesPanel();
+        if (m_ShowPanel)
+            DrawSimulationPanel();
     }
 
     // Background for a rule cell: red for repulsion, green for attraction, dark at 0.
@@ -75,16 +75,69 @@ namespace PLife
         return ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f);
     }
 
-    void Game::DrawRulesPanel()
+    void Game::DrawSimulationPanel()
     {
         const float dpi = GetWindowScaleDPI().x;
         ImGui::SetNextWindowPos(ImVec2(10.0f * dpi, 40.0f * dpi), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin("Rules", &m_ShowRulesPanel, ImGuiWindowFlags_AlwaysAutoResize))
+        if (!ImGui::Begin("Simulation", &m_ShowPanel, ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::End();
             return;
         }
 
+        ImGui::PushItemWidth(ImGui::GetFontSize() * 14.0f);
+        if (ImGui::CollapsingHeader("Rules", ImGuiTreeNodeFlags_DefaultOpen))
+            DrawRulesSection();
+
+        // Every setting edits a copy; any change is applied at once (SetSettings handles resizing).
+        SimulationSettings settings = m_Simulation.GetSettings();
+        bool changed = false;
+
+        if (ImGui::CollapsingHeader("Temperature", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            changed |= ImGui::SliderFloat("Temperature##Value", &settings.Temperature, 0.0f, 10.0f, "%.2f");
+            changed |= ImGui::DragFloatRange2("Eddy diffusion", &settings.EddyDiffusionMin, &settings.EddyDiffusionMax,
+                0.1f, 0.0f, 200.0f, "min %.1f", "max %.1f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::TextDisabled("Each particle gets a random eddy diffusion factor from this range.");
+            ImGui::TextDisabled("Random motion per step: sqrt(2 * temperature * factor * dt).");
+            if (ImGui::Button("Reroll eddy factors"))
+                m_Simulation.RerollEddyDiffusion();
+        }
+
+        if (ImGui::CollapsingHeader("Settings"))
+        {
+            ImGui::SeparatorText("Particles");
+            changed |= ImGui::SliderInt("Particles", &settings.ParticleCount, 0, 10000, "%d", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::SliderInt("Types", &settings.TypeCount, 1, 12, "%d", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::SliderFloat("Particle radius", &settings.ParticleRadius, 0.5f, 10.0f, "%.1f");
+
+            ImGui::SeparatorText("Forces");
+            changed |= ImGui::SliderFloat("Interaction radius", &settings.InteractionRadius, 10.0f, 200.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::SliderFloat("Repulsion range", &settings.RepulsionRange, 0.05f, 0.95f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::SliderFloat("Force factor", &settings.ForceFactor, 0.0f, 50.0f, "%.1f");
+            changed |= ImGui::SliderFloat("Friction half-life", &settings.FrictionHalfLife, 0.005f, 1.0f, "%.3f s",
+                ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::Spacing();
+            if (ImGui::Button("Respawn particles"))
+                m_Simulation.RespawnParticles();
+            ImGui::SameLine();
+            if (ImGui::Button("Reset settings"))
+            {
+                settings = SimulationSettings();
+                changed = true;
+            }
+        }
+        ImGui::PopItemWidth();
+
+        if (changed)
+            m_Simulation.SetSettings(settings);
+
+        ImGui::End();
+    }
+
+    void Game::DrawRulesSection()
+    {
         const int typeCount = m_Simulation.GetSettings().TypeCount;
         const ImGuiColorEditFlags swatchFlags = ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop;
         const float cellWidth = ImGui::GetFontSize() * 3.2f;
@@ -156,11 +209,6 @@ namespace PLife
         ImGui::SameLine();
         if (ImGui::Button("Clear"))
             m_Simulation.ClearRules();
-        ImGui::SameLine();
-        if (ImGui::Button("Respawn particles"))
-            m_Simulation.RespawnParticles();
-
-        ImGui::End();
     }
 
     void Game::HandleViewInput()
@@ -185,7 +233,7 @@ namespace PLife
             return;
 
         if (IsKeyPressed(KEY_TAB))
-            m_ShowRulesPanel = !m_ShowRulesPanel;
+            m_ShowPanel = !m_ShowPanel;
         if (IsKeyPressed(KEY_SPACE))
         {
             m_Paused = !m_Paused;

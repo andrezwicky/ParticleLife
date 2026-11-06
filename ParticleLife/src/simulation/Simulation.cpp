@@ -35,25 +35,99 @@ namespace PLife
         return n;
     }
 
-    Simulation::Simulation(const World& world, const SimulationSettings& settings)
-        : m_World(world), m_Settings(settings), m_Rng(std::random_device{}())
+    // Keep settings in ranges the simulation can handle.
+    static SimulationSettings Sanitize(SimulationSettings s)
     {
-        m_Settings.TypeCount = std::clamp(m_Settings.TypeCount, 1, 255);
+        s.ParticleCount     = std::max(s.ParticleCount, 0);
+        s.TypeCount         = std::clamp(s.TypeCount, 1, 255);
+        s.InteractionRadius = std::max(s.InteractionRadius, 1.0f);
+        s.RepulsionRange    = std::clamp(s.RepulsionRange, 0.01f, 0.99f);
+        s.FrictionHalfLife  = std::max(s.FrictionHalfLife, 0.001f);
+        s.Temperature       = std::max(s.Temperature, 0.0f);
+        s.EddyDiffusionMin  = std::max(s.EddyDiffusionMin, 0.0f);
+        s.EddyDiffusionMax  = std::max(s.EddyDiffusionMax, s.EddyDiffusionMin);
+        s.ParticleRadius    = std::max(s.ParticleRadius, 0.1f);
+        return s;
+    }
 
-        m_TypeColors.resize(m_Settings.TypeCount);
-        for (int i = 0; i < m_Settings.TypeCount; ++i)
-            m_TypeColors[i] = ColorFromHSV(360.0f * i / m_Settings.TypeCount, 0.75f, 1.0f);
+    Simulation::Simulation(const World& world, const SimulationSettings& settings)
+        : m_World(world), m_Settings(Sanitize(settings)), m_Rng(std::random_device{}())
+    {
+        SetupTypes();
+        SetupGrid();
+        RandomizeRules();
+        RespawnParticles();
+    }
 
-        m_Rules.resize(m_Settings.TypeCount * m_Settings.TypeCount, 0.0f);
+    void Simulation::SetupTypes()
+    {
+        const int newCount = m_Settings.TypeCount;
+        const int oldCount = (int)m_TypeColors.size();
 
-        // Grid: as many cells as fit while staying at least InteractionRadius wide.
+        m_TypeColors.resize(newCount);
+        for (int i = 0; i < newCount; ++i)
+            m_TypeColors[i] = ColorFromHSV(360.0f * i / newCount, 0.75f, 1.0f);
+
+        // Keep the rules between types that still exist; new pairs get random rules.
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        std::vector<float> rules(newCount * newCount);
+        for (int a = 0; a < newCount; ++a)
+            for (int b = 0; b < newCount; ++b)
+                rules[a * newCount + b] = (a < oldCount && b < oldCount) ? m_Rules[a * oldCount + b] : dist(m_Rng);
+        m_Rules = std::move(rules);
+    }
+
+    void Simulation::SetupGrid()
+    {
+        // As many cells as fit while staying at least InteractionRadius wide.
         m_CellsX = std::max(1, (int)(m_World.GetWidth() / m_Settings.InteractionRadius));
         m_CellsY = std::max(1, (int)(m_World.GetHeight() / m_Settings.InteractionRadius));
         m_CellWidth = m_World.GetWidth() / m_CellsX;
         m_CellHeight = m_World.GetHeight() / m_CellsY;
+    }
 
-        RandomizeRules();
-        RespawnParticles();
+    void Simulation::SetSettings(const SimulationSettings& settings)
+    {
+        const SimulationSettings old = m_Settings;
+        m_Settings = Sanitize(settings);
+
+        if (m_Settings.TypeCount != old.TypeCount)
+        {
+            SetupTypes();
+            std::uniform_int_distribution<int> type(0, m_Settings.TypeCount - 1);
+            for (Particle& p : m_Particles)
+                if (p.Type >= m_Settings.TypeCount)
+                    p.Type = (uint8_t)type(m_Rng);
+        }
+
+        if (m_Settings.InteractionRadius != old.InteractionRadius)
+            SetupGrid();
+
+        if (m_Settings.EddyDiffusionMin != old.EddyDiffusionMin || m_Settings.EddyDiffusionMax != old.EddyDiffusionMax)
+            RerollEddyDiffusion();
+
+        if ((int)m_Particles.size() > m_Settings.ParticleCount)
+            m_Particles.resize(m_Settings.ParticleCount);
+        if ((int)m_Particles.size() < m_Settings.ParticleCount)
+        {
+            std::uniform_real_distribution<float> x(0.0f, m_World.GetWidth());
+            std::uniform_real_distribution<float> y(0.0f, m_World.GetHeight());
+            std::uniform_int_distribution<int> type(0, m_Settings.TypeCount - 1);
+            while ((int)m_Particles.size() < m_Settings.ParticleCount)
+                Spawn({ x(m_Rng), y(m_Rng) }, (uint8_t)type(m_Rng));
+        }
+    }
+
+    float Simulation::RandomEddyDiffusion()
+    {
+        std::uniform_real_distribution<float> dist(m_Settings.EddyDiffusionMin, m_Settings.EddyDiffusionMax);
+        return m_Settings.EddyDiffusionMin < m_Settings.EddyDiffusionMax ? dist(m_Rng) : m_Settings.EddyDiffusionMin;
+    }
+
+    void Simulation::RerollEddyDiffusion()
+    {
+        for (Particle& p : m_Particles)
+            p.EddyDiffusion = RandomEddyDiffusion();
     }
 
     void Simulation::RandomizeRules()
@@ -80,7 +154,7 @@ namespace PLife
         position.x = WrapCoord(position.x, m_World.GetWidth());
         position.y = WrapCoord(position.y, m_World.GetHeight());
         type = (uint8_t)std::min<int>(type, m_Settings.TypeCount - 1);
-        m_Particles.push_back({ position, { 0.0f, 0.0f }, type });
+        m_Particles.push_back({ position, { 0.0f, 0.0f }, RandomEddyDiffusion(), type });
     }
 
     float Simulation::Force(float x, float attraction) const
@@ -169,15 +243,29 @@ namespace PLife
             m_Accelerations[i] = { sum.x * rMax * m_Settings.ForceFactor, sum.y * rMax * m_Settings.ForceFactor };
         }
 
-        // 2) Integrate with frame-rate independent friction, then wrap around the edges.
+        // 2) Integrate with frame-rate independent friction, add thermal motion
+        //    (random walk, step size from temperature and the particle's eddy diffusion),
+        //    then wrap around the edges.
         const float friction = std::pow(0.5f, dt / m_Settings.FrictionHalfLife);
+        const float thermal = 2.0f * m_Settings.Temperature * dt; // * EddyDiffusion -> variance per axis
+        std::normal_distribution<float> noise(0.0f, 1.0f);
         for (size_t i = 0; i < m_Particles.size(); ++i)
         {
             Particle& p = m_Particles[i];
             p.Velocity.x = p.Velocity.x * friction + m_Accelerations[i].x * dt;
             p.Velocity.y = p.Velocity.y * friction + m_Accelerations[i].y * dt;
-            p.Position.x = WrapCoord(p.Position.x + p.Velocity.x * dt, width);
-            p.Position.y = WrapCoord(p.Position.y + p.Velocity.y * dt, height);
+
+            Vector2 move = { p.Velocity.x * dt, p.Velocity.y * dt };
+            const float variance = thermal * p.EddyDiffusion;
+            if (variance > 0.0f)
+            {
+                const float sigma = std::sqrt(variance);
+                move.x += noise(m_Rng) * sigma;
+                move.y += noise(m_Rng) * sigma;
+            }
+
+            p.Position.x = WrapCoord(p.Position.x + move.x, width);
+            p.Position.y = WrapCoord(p.Position.y + move.y, height);
         }
     }
 
