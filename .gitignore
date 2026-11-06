@@ -1,0 +1,12 @@
+# Directories
+.vs/
+bin/
+bin-int/
+
+# Files
+imgui.ini
+*.vcxproj
+*.vcxproj.user
+*.vcxproj.filters
+*.sln
+*.xxx
