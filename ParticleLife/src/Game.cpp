@@ -3,6 +3,8 @@
 
 #include <cmath>
 
+#include "imgui.h"
+
 namespace PLife
 {
     static constexpr float s_StepTime = 1.0f / 60.0f;
@@ -49,12 +51,123 @@ namespace PLife
         const float bottom = m_Renderer->GetScreenSize().y;
         m_Renderer->DrawScreenText(TextFormat("%d particles%s", (int)m_Simulation.GetParticles().size(), m_Paused ? "   PAUSED" : ""),
             10.0f, 10.0f, 18.0f, RAYWHITE);
-        m_Renderer->DrawScreenText("Wheel: zoom   Right drag: pan   R: reset view   Space: pause   S: single step   N: new rules   P: respawn",
+        m_Renderer->DrawScreenText("Wheel: zoom   Right drag: pan   R: reset view   Space: pause   S: single step   N: new rules   P: respawn   Tab: rules panel",
             10.0f, bottom - 26.0f, 16.0f, GRAY);
+    }
+
+    void Game::OnImGuiRender()
+    {
+        if (m_ShowRulesPanel)
+            DrawRulesPanel();
+    }
+
+    // Background for a rule cell: red for repulsion, green for attraction, dark at 0.
+    static ImVec4 RuleColor(float value)
+    {
+        const float t = std::abs(value);
+        return value >= 0.0f
+            ? ImVec4(0.12f, 0.12f + 0.55f * t, 0.12f, 1.0f)
+            : ImVec4(0.12f + 0.65f * t, 0.12f, 0.12f, 1.0f);
+    }
+
+    static ImVec4 ToImVec4(Color c)
+    {
+        return ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f);
+    }
+
+    void Game::DrawRulesPanel()
+    {
+        const float dpi = GetWindowScaleDPI().x;
+        ImGui::SetNextWindowPos(ImVec2(10.0f * dpi, 40.0f * dpi), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin("Rules", &m_ShowRulesPanel, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::End();
+            return;
+        }
+
+        const int typeCount = m_Simulation.GetSettings().TypeCount;
+        const ImGuiColorEditFlags swatchFlags = ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop;
+        const float cellWidth = ImGui::GetFontSize() * 3.2f;
+        const ImVec2 swatchSize(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
+
+        ImGui::TextDisabled("Row type reacts to column type.");
+        ImGui::TextDisabled("Drag to change, Ctrl+click to type, right-click to zero.");
+
+        if (ImGui::BeginTable("RuleMatrix", typeCount + 1, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX))
+        {
+            // Header row: color of each target type.
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            for (int b = 0; b < typeCount; ++b)
+            {
+                ImGui::TableNextColumn();
+                ImGui::PushID(b);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (cellWidth - swatchSize.x) * 0.5f);
+                ImGui::ColorButton("##col", ToImVec4(m_Simulation.GetTypeColor(b)), swatchFlags, swatchSize);
+                ImGui::PopID();
+            }
+
+            for (int a = 0; a < typeCount; ++a)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(a);
+                ImGui::ColorButton("##row", ToImVec4(m_Simulation.GetTypeColor(a)), swatchFlags, swatchSize);
+
+                for (int b = 0; b < typeCount; ++b)
+                {
+                    ImGui::TableNextColumn();
+                    ImGui::PushID(b);
+
+                    float value = m_Simulation.GetRule(a, b);
+                    const ImVec4 bg = RuleColor(value);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, bg);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(bg.x + 0.1f, bg.y + 0.1f, bg.z + 0.1f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(bg.x + 0.2f, bg.y + 0.2f, bg.z + 0.2f, 1.0f));
+                    ImGui::SetNextItemWidth(cellWidth);
+                    if (ImGui::DragFloat("##rule", &value, 0.01f, -1.0f, 1.0f, "%+.2f", ImGuiSliderFlags_AlwaysClamp))
+                        m_Simulation.SetRule(a, b, value);
+                    ImGui::PopStyleColor(3);
+
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                        m_Simulation.SetRule(a, b, 0.0f);
+
+                    if (ImGui::BeginItemTooltip())
+                    {
+                        ImGui::ColorButton("##a", ToImVec4(m_Simulation.GetTypeColor(a)), swatchFlags);
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted(value > 0.0f ? "is attracted to" : value < 0.0f ? "is repelled by" : "ignores");
+                        ImGui::SameLine();
+                        ImGui::ColorButton("##b", ToImVec4(m_Simulation.GetTypeColor(b)), swatchFlags);
+                        ImGui::SameLine();
+                        ImGui::Text("(%+.2f)", value);
+                        ImGui::EndTooltip();
+                    }
+
+                    ImGui::PopID();
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        if (ImGui::Button("Randomize"))
+            m_Simulation.RandomizeRules();
+        ImGui::SameLine();
+        if (ImGui::Button("Clear"))
+            m_Simulation.ClearRules();
+        ImGui::SameLine();
+        if (ImGui::Button("Respawn particles"))
+            m_Simulation.RespawnParticles();
+
+        ImGui::End();
     }
 
     void Game::HandleViewInput()
     {
+        if (ImGui::GetIO().WantCaptureMouse) // mouse is over a panel
+            return;
+
         const float wheel = GetMouseWheelMove();
         if (wheel != 0.0f)
             m_Renderer->ZoomAt(GetMousePosition(), std::pow(1.15f, wheel));
@@ -68,6 +181,11 @@ namespace PLife
 
     void Game::HandleSimulationInput()
     {
+        if (ImGui::GetIO().WantCaptureKeyboard) // typing into a panel
+            return;
+
+        if (IsKeyPressed(KEY_TAB))
+            m_ShowRulesPanel = !m_ShowRulesPanel;
         if (IsKeyPressed(KEY_SPACE))
         {
             m_Paused = !m_Paused;

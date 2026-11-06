@@ -1,5 +1,7 @@
 #include "Application.h"
 #include "raylib.h"
+#include "rlImGui.h"
+#include "imgui.h"
 
 namespace PLife
 {
@@ -26,6 +28,11 @@ namespace PLife
         BeginDrawing();
         ClearBackground(BLACK);
         OnRender();
+
+        rlImGuiBegin();
+        OnImGuiRender();
+        rlImGuiEnd();
+
         EndDrawing();
     }
     void Application::Run()
@@ -46,6 +53,9 @@ namespace PLife
                 SetWindowPosition((GetMonitorWidth(monitor) - width) / 2, (GetMonitorHeight(monitor) - height) / 2);
             }
         }
+        rlImGuiSetup(true); // dark theme; fonts are already scaled by DPI
+        ImGui::GetStyle().ScaleAllSizes(GetWindowScaleDPI().x);
+
         SetExitKey(0); // ESC does not close the window
         SetTargetFPS(60);
 
@@ -57,6 +67,7 @@ namespace PLife
         }
 
         m_Game.reset(); // before CloseWindow: Game frees GPU resources while the context still exists
+        rlImGuiShutdown();
         CloseWindow();
     }
     void Application::OnUpdate()
@@ -67,5 +78,10 @@ namespace PLife
     void Application::OnRender()
     {
         m_Game->OnRender();
+    }
+
+    void Application::OnImGuiRender()
+    {
+        m_Game->OnImGuiRender();
     }
 }

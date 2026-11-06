@@ -24,6 +24,7 @@ namespace PLife
         void Run();
         void OnUpdate();
         void OnRender();
+        void OnImGuiRender();
 
     public:
         static Application& Get();

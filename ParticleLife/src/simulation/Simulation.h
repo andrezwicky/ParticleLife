@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -54,7 +55,8 @@ namespace PLife
 
         // rules[a][b]: how strongly type a is attracted to (+) / repelled by (-) type b.
         float GetRule(int a, int b) const { return m_Rules[a * m_Settings.TypeCount + b]; }
-        void  SetRule(int a, int b, float value) { m_Rules[a * m_Settings.TypeCount + b] = value; }
+        void  SetRule(int a, int b, float value) { m_Rules[a * m_Settings.TypeCount + b] = std::clamp(value, -1.0f, 1.0f); }
+        void  ClearRules() { std::fill(m_Rules.begin(), m_Rules.end(), 0.0f); }
 
         const std::vector<Particle>& GetParticles() const { return m_Particles; }
         const SimulationSettings& GetSettings() const { return m_Settings; }
