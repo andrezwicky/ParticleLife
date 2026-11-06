@@ -20,15 +20,21 @@ namespace PLife
         uint8_t Type;           // index into the rule matrix / color table
     };
 
+    // Force settings of one particle type. They apply to the type's particles as the
+    // ones reacting: type a feels type b within a's radius, shaped by a's repulsion range.
+    struct TypeSettings
+    {
+        float InteractionRadius = 80.0f;  // rMax: how far particles of this type sense others (world units)
+        float RepulsionRange    = 0.3f;   // beta: fraction of rMax below which they always repel
+    };
+
     struct SimulationSettings
     {
         // Particles
         int   ParticleCount     = 2000;
         int   TypeCount         = 6;
 
-        // Forces
-        float InteractionRadius = 80.0f;  // rMax: particles further apart than this ignore each other (world units)
-        float RepulsionRange    = 0.3f;   // beta: fraction of rMax below which particles always repel
+        // Forces (interaction radius and repulsion range are per type, see TypeSettings)
         float ForceFactor       = 10.0f;  // overall force strength
         float FrictionHalfLife  = 0.04f;  // seconds until velocity halves without forces
 
@@ -68,7 +74,13 @@ namespace PLife
         // Draw a new eddy diffusion factor for every particle from the settings' range.
         void RerollEddyDiffusion();
 
-        // Applies changed settings live: resizes the rule matrix (keeping existing rules),
+        const TypeSettings& GetTypeSettings(int type) const { return m_TypeSettings[type]; }
+        // Applies live; rebuilds the neighbor grid if the largest radius changes.
+        void SetTypeSettings(int type, const TypeSettings& settings);
+        // All types back to TypeSettings defaults.
+        void ResetTypeSettings();
+
+        // Applies changed settings live: resizes the rule matrix and type settings (keeping existing ones),
         // adds/removes particles, rebuilds the neighbor grid and rerolls eddy factors as needed.
         void SetSettings(const SimulationSettings& settings);
 
@@ -82,10 +94,10 @@ namespace PLife
         Color GetTypeColor(int type) const { return m_TypeColors[type]; }
 
     private:
-        float Force(float normalizedDistance, float attraction) const;
+        static float Force(float normalizedDistance, float attraction, float repulsionRange);
         float RandomEddyDiffusion();
-        void  SetupTypes();     // colors and rule matrix size from TypeCount
-        void  SetupGrid();      // cell layout from InteractionRadius
+        void  SetupTypes();     // colors, rule matrix and type settings sized to TypeCount
+        void  SetupGrid();      // cell layout from the largest interaction radius
         void  BuildGrid();      // sort particles into cells
 
     private:
@@ -95,8 +107,9 @@ namespace PLife
         std::vector<Particle> m_Particles;
         std::vector<float>    m_Rules;      // TypeCount * TypeCount, row = acting type
         std::vector<Color>    m_TypeColors;
+        std::vector<TypeSettings> m_TypeSettings;
 
-        // Uniform grid for neighbor search; cells are at least InteractionRadius wide,
+        // Uniform grid for neighbor search; cells are at least as wide as the largest interaction radius,
         // so all neighbors of a particle are in its own or the 8 surrounding cells.
         int m_CellsX = 1;
         int m_CellsY = 1;

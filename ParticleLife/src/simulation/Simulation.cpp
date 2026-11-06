@@ -40,13 +40,18 @@ namespace PLife
     {
         s.ParticleCount     = std::max(s.ParticleCount, 0);
         s.TypeCount         = std::clamp(s.TypeCount, 1, 255);
-        s.InteractionRadius = std::max(s.InteractionRadius, 1.0f);
-        s.RepulsionRange    = std::clamp(s.RepulsionRange, 0.01f, 0.99f);
         s.FrictionHalfLife  = std::max(s.FrictionHalfLife, 0.001f);
         s.Temperature       = std::max(s.Temperature, 0.0f);
         s.EddyDiffusionMin  = std::max(s.EddyDiffusionMin, 0.0f);
         s.EddyDiffusionMax  = std::max(s.EddyDiffusionMax, s.EddyDiffusionMin);
         s.ParticleRadius    = std::max(s.ParticleRadius, 0.1f);
+        return s;
+    }
+
+    static TypeSettings Sanitize(TypeSettings s)
+    {
+        s.InteractionRadius = std::max(s.InteractionRadius, 1.0f);
+        s.RepulsionRange    = std::clamp(s.RepulsionRange, 0.01f, 0.99f);
         return s;
     }
 
@@ -75,15 +80,37 @@ namespace PLife
             for (int b = 0; b < newCount; ++b)
                 rules[a * newCount + b] = (a < oldCount && b < oldCount) ? m_Rules[a * oldCount + b] : dist(m_Rng);
         m_Rules = std::move(rules);
+
+        // Existing types keep their settings; new types start with the defaults.
+        m_TypeSettings.resize(newCount);
     }
 
     void Simulation::SetupGrid()
     {
-        // As many cells as fit while staying at least InteractionRadius wide.
-        m_CellsX = std::max(1, (int)(m_World.GetWidth() / m_Settings.InteractionRadius));
-        m_CellsY = std::max(1, (int)(m_World.GetHeight() / m_Settings.InteractionRadius));
+        // As many cells as fit while staying at least as wide as the largest radius,
+        // so every particle's neighbors are within the surrounding 3x3 cells.
+        float maxRadius = 1.0f;
+        for (const TypeSettings& ts : m_TypeSettings)
+            maxRadius = std::max(maxRadius, ts.InteractionRadius);
+
+        m_CellsX = std::max(1, (int)(m_World.GetWidth() / maxRadius));
+        m_CellsY = std::max(1, (int)(m_World.GetHeight() / maxRadius));
         m_CellWidth = m_World.GetWidth() / m_CellsX;
         m_CellHeight = m_World.GetHeight() / m_CellsY;
+    }
+
+    void Simulation::SetTypeSettings(int type, const TypeSettings& settings)
+    {
+        const float oldRadius = m_TypeSettings[type].InteractionRadius;
+        m_TypeSettings[type] = Sanitize(settings);
+        if (m_TypeSettings[type].InteractionRadius != oldRadius)
+            SetupGrid();
+    }
+
+    void Simulation::ResetTypeSettings()
+    {
+        std::fill(m_TypeSettings.begin(), m_TypeSettings.end(), TypeSettings());
+        SetupGrid();
     }
 
     void Simulation::SetSettings(const SimulationSettings& settings)
@@ -94,14 +121,12 @@ namespace PLife
         if (m_Settings.TypeCount != old.TypeCount)
         {
             SetupTypes();
+            SetupGrid(); // the largest radius may have changed with the types
             std::uniform_int_distribution<int> type(0, m_Settings.TypeCount - 1);
             for (Particle& p : m_Particles)
                 if (p.Type >= m_Settings.TypeCount)
                     p.Type = (uint8_t)type(m_Rng);
         }
-
-        if (m_Settings.InteractionRadius != old.InteractionRadius)
-            SetupGrid();
 
         if (m_Settings.EddyDiffusionMin != old.EddyDiffusionMin || m_Settings.EddyDiffusionMax != old.EddyDiffusionMax)
             RerollEddyDiffusion();
@@ -157,9 +182,8 @@ namespace PLife
         m_Particles.push_back({ position, { 0.0f, 0.0f }, RandomEddyDiffusion(), type });
     }
 
-    float Simulation::Force(float x, float attraction) const
+    float Simulation::Force(float x, float attraction, float beta)
     {
-        const float beta = m_Settings.RepulsionRange;
         if (x < beta)
             return x / beta - 1.0f;                                                // always repel up close
         if (x < 1.0f)
@@ -196,8 +220,6 @@ namespace PLife
     {
         const float width = m_World.GetWidth();
         const float height = m_World.GetHeight();
-        const float rMax = m_Settings.InteractionRadius;
-        const float rMaxSq = rMax * rMax;
         const int typeCount = m_Settings.TypeCount;
 
         BuildGrid();
@@ -208,6 +230,9 @@ namespace PLife
         {
             const Particle& a = m_Particles[i];
             const float* rules = &m_Rules[a.Type * typeCount];
+            const TypeSettings& ts = m_TypeSettings[a.Type]; // the reacting particle's type decides
+            const float rMax = ts.InteractionRadius;
+            const float rMaxSq = rMax * rMax;
             const int cell = m_ParticleCell[i];
 
             int xs[3], ys[3];
@@ -234,7 +259,7 @@ namespace PLife
                             continue;
 
                         const float dist = std::sqrt(distSq);
-                        const float f = Force(dist / rMax, rules[b.Type]);
+                        const float f = Force(dist / rMax, rules[b.Type], ts.RepulsionRange);
                         sum.x += dx / dist * f;
                         sum.y += dy / dist * f;
                     }

@@ -88,6 +88,8 @@ namespace PLife
         ImGui::PushItemWidth(ImGui::GetFontSize() * 14.0f);
         if (ImGui::CollapsingHeader("Rules", ImGuiTreeNodeFlags_DefaultOpen))
             DrawRulesSection();
+        if (ImGui::CollapsingHeader("Type forces", ImGuiTreeNodeFlags_DefaultOpen))
+            DrawTypeForcesSection();
 
         // Every setting edits a copy; any change is applied at once (SetSettings handles resizing).
         SimulationSettings settings = m_Simulation.GetSettings();
@@ -112,8 +114,6 @@ namespace PLife
             changed |= ImGui::SliderFloat("Particle radius", &settings.ParticleRadius, 0.5f, 10.0f, "%.1f");
 
             ImGui::SeparatorText("Forces");
-            changed |= ImGui::SliderFloat("Interaction radius", &settings.InteractionRadius, 10.0f, 200.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
-            changed |= ImGui::SliderFloat("Repulsion range", &settings.RepulsionRange, 0.05f, 0.95f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::SliderFloat("Force factor", &settings.ForceFactor, 0.0f, 50.0f, "%.1f");
             changed |= ImGui::SliderFloat("Friction half-life", &settings.FrictionHalfLife, 0.005f, 1.0f, "%.3f s",
                 ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
@@ -126,6 +126,7 @@ namespace PLife
             {
                 settings = SimulationSettings();
                 changed = true;
+                m_Simulation.ResetTypeSettings();
             }
         }
         ImGui::PopItemWidth();
@@ -134,6 +135,50 @@ namespace PLife
             m_Simulation.SetSettings(settings);
 
         ImGui::End();
+    }
+
+    void Game::DrawTypeForcesSection()
+    {
+        const int typeCount = m_Simulation.GetSettings().TypeCount;
+        const ImGuiColorEditFlags swatchFlags = ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop;
+        const float columnWidth = ImGui::GetFontSize() * 9.0f;
+
+        ImGui::TextDisabled("How each type senses others (as the reacting type).");
+
+        if (ImGui::BeginTable("TypeForces", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX))
+        {
+            ImGui::TableSetupColumn("##Type");
+            ImGui::TableSetupColumn("Interaction radius");
+            ImGui::TableSetupColumn("Repulsion range");
+            ImGui::TableHeadersRow();
+
+            for (int type = 0; type < typeCount; ++type)
+            {
+                ImGui::PushID(type);
+                TypeSettings ts = m_Simulation.GetTypeSettings(type);
+                bool changed = false;
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::ColorButton("##Color", ToImVec4(m_Simulation.GetTypeColor(type)), swatchFlags);
+
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(columnWidth);
+                changed |= ImGui::SliderFloat("##Radius", &ts.InteractionRadius, 10.0f, 200.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(columnWidth);
+                changed |= ImGui::SliderFloat("##Repulsion", &ts.RepulsionRange, 0.05f, 0.95f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+
+                if (changed)
+                    m_Simulation.SetTypeSettings(type, ts);
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+
+        if (ImGui::Button("Reset type forces"))
+            m_Simulation.ResetTypeSettings();
     }
 
     void Game::DrawRulesSection()

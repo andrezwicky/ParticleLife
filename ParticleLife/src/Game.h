@@ -31,6 +31,7 @@ namespace PLife
         void HandleSimulationInput();
         void DrawSimulationPanel();
         void DrawRulesSection();
+        void DrawTypeForcesSection();
 
     private:
         // Declaration order matters: Simulation and Renderer reference the World.
