@@ -1,7 +1,9 @@
 # Directories
 .vs/
-bin/
-bin-int/
+/bin/
+/bin-int/
+vendor/rlImGui/bin/
+vendor/rlImGui/bin-int/
 
 # Files
 imgui.ini

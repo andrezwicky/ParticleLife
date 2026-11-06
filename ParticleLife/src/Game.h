@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "world/world.h"
+#include "simulation/Simulation.h"
 
 namespace PLife
 {
@@ -26,9 +27,17 @@ namespace PLife
 
     private:
         void HandleViewInput();
+        void HandleSimulationInput();
 
     private:
+        // Declaration order matters: Simulation and Renderer reference the World.
         World m_World;
+        Simulation m_Simulation;
         std::unique_ptr<Renderer> m_Renderer;
+
+        // Fixed timestep: the simulation always advances in steps of s_StepTime,
+        // independent of the frame rate.
+        float m_StepAccumulator = 0.0f;
+        bool m_Paused = false;
     };
 }
